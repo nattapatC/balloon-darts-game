@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ปาโป่งหรรษาหาเลขคู่เลขคี่</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Mitr', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            touch-action: none; /* Prevent scroll on mobile during gameplay */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Custom Animations */
+        @keyframes bounce-slow {
+            0%, 100% { transform: translateY(-5%); }
+            50% { transform: translateY(5%); }
+        }
+        .animate-bounce-slow {
+            animation: bounce-slow 3s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% { text-shadow: 0 0 10px #ffea00, 0 0 20px #ffea00, 0 0 30px #ff9d00; }
+            50% { text-shadow: 0 0 20px #ffea00, 0 0 30px #ffea00, 0 0 40px #ff9d00, 0 0 50px #ff9d00; }
+        }
+        .text-glow {
+            animation: glow 2s ease-in-out infinite;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .btn-press:active {
+            transform: scale(0.95);
+            box-shadow: inset 0 3px 5px rgba(0,0,0,0.2);
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            cursor: none;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            pointer-events: none; 
+        }
+        
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+
+        /* Loader */
+        .loader {
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #ff4757;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Modal tweaks */
+        .modal-bg {
+            background: linear-gradient(135deg, rgba(20,0,40,0.9) 0%, rgba(60,0,20,0.9) 100%);
+            box-shadow: 0 0 30px rgba(255, 100, 200, 0.4) inset;
+        }
+
+        .right-game-menu {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 35;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Hidden video element for MediaPipe AR -->
+    <video id="input_video" class="hidden" autoplay playsinline></video>
+
+    <canvas id="game_canvas"></canvas>
+
+    <div id="ui-layer" class="flex flex-col justify-between">
+        
+        <!-- Top HUD -->
+        <div id="hud" class="w-full text-center hidden p-2 z-30 relative">
+            <div class="bg-black/60 text-white rounded-full px-6 py-2 inline-flex items-center gap-4 shadow-lg border-2 border-yellow-400/50 backdrop-blur-sm">
+                <p class="text-sm md:text-lg font-semibold tracking-wide m-0">
+                    คะแนน: <span id="score-display" class="text-yellow-400 font-bold text-xl md:text-2xl">0</span> 
+                </p>
+                <div class="w-px h-6 bg-white/30"></div>
+                <p class="text-sm md:text-lg font-semibold tracking-wide m-0">
+                    คำถาม: <span id="round-display" class="text-cyan-400 font-bold text-xl md:text-2xl">0</span><span class="text-white/70">/20</span>
+                </p>
+                <div class="w-px h-6 bg-white/30"></div>
+                <p class="text-xs md:text-sm text-pink-300 font-medium m-0 animate-pulse">
+                    ปาโดนเลขคู่เท่านั้น!
+                </p>
+            </div>
+        </div>
+
+        <div id="game-menu" class="right-game-menu hidden pointer-events-auto">
+            <div class="flex flex-col gap-3 bg-black/55 backdrop-blur-md border border-white/10 rounded-2xl p-3 shadow-xl">
+                <button id="menu-restart-btn" class="btn-press bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg border border-white/20">
+                    เริ่มใหม่
+                </button>
+                <button id="menu-home-btn" class="btn-press bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg border border-white/20">
+                    หน้าแรก
+                </button>
+            </div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="pointer-events-auto absolute inset-0 flex flex-col items-center justify-center modal-bg backdrop-blur-md transition-opacity duration-500 overflow-hidden">
+            <video id="intro-video" class="absolute inset-0 w-full h-full object-cover" src="assets/cover.mp4" poster="assets/cover.jpeg" autoplay loop playsinline preload="auto" muted></video>
+
+            <div class="relative z-10 flex flex-col items-center">
+                <!-- <h1 class="text-5xl md:text-7xl text-glow mb-4 text-center animate-bounce-slow">ปาโป่งหรรษา<br>หาเลขคู่</h1> -->
+
+                <!-- <div class="bg-black/40 p-6 rounded-2xl border border-white/10 max-w-lg mb-8 text-center mx-4 shadow-xl">
+                <p class="text-white text-lg md:text-xl leading-relaxed">
+                    กติกา: ปาลูกดอกใส่ลูกโป่ง <strong>"เลขคู่"</strong> เท่านั้น!<br>
+                    มีคำลวงเป็นเลขคี่ปะปนอยู่ ระวังให้ดี!
+                </p>
+                <p class="text-yellow-300 text-sm mt-4">
+                    เล่นได้ 2 โหมด: <br>1. ใช้เมาส์/นิ้วลากแล้วปล่อย<br>2. ใช้กล้อง (AR) จีบมือ ดึง แล้วปล่อย
+                </p>
+                </div> -->
+
+                <div class="fixed bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col sm:flex-row gap-4 px-4">
+                    <button id="start-touch-btn" class="btn-press bg-gradient-to-r from-blue-500 to-cyan-400 hover:from-blue-600 hover:to-cyan-500 text-white font-bold py-4 px-8 rounded-full text-xl md:text-2xl shadow-[0_0_15px_rgba(56,189,248,0.6)] transition-all border-2 border-white/30 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                        เล่นโหมดปกติ (สัมผัส)
+                    </button>
+                    <button id="start-ar-btn" class="btn-press bg-gradient-to-r from-pink-500 to-orange-400 hover:from-pink-600 hover:to-orange-500 text-white font-bold py-4 px-8 rounded-full text-xl md:text-2xl shadow-[0_0_20px_rgba(236,72,153,0.7)] transition-all border-2 border-white/30 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        เล่นโหมด AR (เปิดกล้อง)
+                    </button>
+                </div>
+                
+                <div id="loading-status" class="hidden flex-col items-center mt-6">
+                    <div class="loader mb-3"></div>
+                    <p id="loading-text" class="text-white text-lg font-medium">กำลังเตรียมระบบ...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="pointer-events-auto absolute inset-0 hidden flex-col items-center justify-center modal-bg backdrop-blur-md">
+            <h2 class="text-6xl text-glow mb-6 text-center animate-bounce-slow">จบเกม!</h2>
+            <div class="bg-black/40 p-10 rounded-3xl border-2 border-yellow-400/30 text-center mb-8 shadow-[0_0_30px_rgba(250,204,21,0.3)]">
+                <p class="text-2xl text-white mb-2">คะแนนรวมของคุณ</p>
+                <p id="final-score" class="text-8xl font-bold text-yellow-400 drop-shadow-lg mb-2">0</p>
+                <p class="text-gray-300 mt-2">เล่นครบ 30 คำถาม</p>
+            </div>
+            <button id="restart-btn" class="btn-press bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-bold py-4 px-12 rounded-full text-2xl shadow-lg border-2 border-white/30 transition-all">
+                เล่นอีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game_canvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('input_video');
+        const introVideo = document.getElementById('intro-video');
+        
+        let GAME_STATE = 'START'; // START, LOADING, PLAYING, GAMEOVER
+        let INPUT_MODE = 'TOUCH'; // TOUCH, AR
+        let score = 0;
+        let roundsPlayed = 0;
+        const MAX_ROUNDS = 20;
+        let animationId;
+
+        // Image Assets Handling
+        const assets = {
+            bg: new Image(),
+            char: new Image(),
+            dart: new Image()
+        };
+        const assetsLoaded = { bg: false, char: false, dart: false };
+
+        // Attempt direct load from postimg.cc. If these fail, we use canvas drawing fallbacks.
+        // Appending ?.png to attempt force direct image if the link isn't giving the raw file easily
+        
+        assets.bg.src = 'https://i.postimg.cc/PJLBDTJ0/ingame-bg.jpg'; 
+        assets.char.src = 'https://i.postimg.cc/sMHRw5nT/image.png';
+        assets.dart.src = 'https://i.postimg.cc/dDRqp3Rt/image.png';
+
+        assets.bg.onload = () => assetsLoaded.bg = true;
+        assets.char.onload = () => assetsLoaded.char = true;
+        assets.dart.onload = () => assetsLoaded.dart = true;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const sfx = {
+            correct: new Audio('assets/correct.mp3'),
+            wrong: new Audio('assets/wrong.mp3')
+        };
+        sfx.correct.preload = 'auto';
+        sfx.wrong.preload = 'auto';
+
+        function playSfx(audio) {
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+        }
+        
+        function playTone(freq, type, duration, vol=0.1) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        // Extremely exaggerated correct sound
+        function playCorrectSound() {
+            
+            // Bright chord + ascending arp
+            // [440, 554, 659, 880].forEach((freq, i) => {
+            //     setTimeout(() => playTone(freq, 'sine', 0.4, 0.2), i * 50);
+            // });
+            // setTimeout(() => playTone(1760, 'sine', 0.5, 0.1), 200);
+            // speak("ถูกต้องครับ เยี่ยมมาก!", 1.5, 1.2);
+
+            playSfx(sfx.correct);
+        }
+
+        // Exaggerated wrong sound
+        function playWrongSound() {
+            
+            // Descending dissonant tones
+            // playTone(300, 'sawtooth', 0.3, 0.2);
+            // setTimeout(() => playTone(250, 'sawtooth', 0.4, 0.25), 100);
+            // setTimeout(() => playTone(150, 'square', 0.5, 0.3), 250);
+            // speak("ลองใหม่ครับ ต้องเป็นเลขคู่นะ", 0.8, 1.0);
+            
+            playSfx(sfx.wrong);
+        }
+        
+        function playPopSound() {
+            playTone(800, 'square', 0.05, 0.1);
+            setTimeout(() => playTone(400, 'square', 0.1, 0.05), 50);
+        }
+
+        function speak(text, pitch=1, rate=1) {
+            if ('speechSynthesis' in window) {
+                // Cancel previous speech to prevent overlap delay
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'th-TH';
+                utterance.pitch = pitch;
+                utterance.rate = rate;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function goHome() {
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.remove('flex');
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-menu').classList.add('hidden');
+            stopBGM();
+            cancelAnimationFrame(animationId);
+            GAME_STATE = 'START';
+            document.getElementById('start-screen').classList.remove('hidden');
+            document.getElementById('start-touch-btn').classList.remove('hidden');
+            document.getElementById('start-ar-btn').classList.remove('hidden');
+            document.getElementById('loading-status').classList.add('hidden');
+            introVideo.muted = false;
+            introVideo.currentTime = 0;
+            introVideo.play().catch(() => {});
+            if (INPUT_MODE === 'AR' && videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+                videoElement.srcObject = null;
+            }
+        }
+
+        function playIntroVideo(src) {
+            if (!src) return;
+            introVideo.src = src;
+            introVideo.loop = true;
+            introVideo.muted = true;
+            introVideo.playsInline = true;
+            introVideo.load();
+            introVideo.play().catch(() => {});
+        }
+
+        // Lively "Temple Fair" (งานวัด) style BGM sequence
+        let bgmInterval;
+        function startBGM() {
+            if(bgmInterval) return;
+            // Pentatonic scale commonly found in Thai folk music
+            const notes = [392, 440, 523, 587, 659, 783, 880]; 
+            bgmInterval = setInterval(() => {
+                if(GAME_STATE === 'PLAYING') {
+                    if(Math.random() > 0.2) {
+                        let freq = notes[Math.floor(Math.random() * notes.length)];
+                        playTone(freq, 'triangle', 0.15, 0.03); // Kept quiet so it doesn't annoy
+                    }
+                }
+            }, 250);
+        }
+        function stopBGM() {
+            clearInterval(bgmInterval);
+            bgmInterval = null;
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if(GAME_STATE === 'PLAYING') {
+                initBalloons(true); // Maintain state if resizing during play
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Input state (unified for both AR and Touch)
+        let cursorX = window.innerWidth / 2;
+        let cursorY = window.innerHeight * 0.8;
+        let isAiming = false; // "จีบ" or dragging
+        let aimStartX = 0;
+        let aimStartY = 0;
+        let isInputActive = false; // Hand detected or mouse over canvas
+
+        const THROW_ZONE_Y = 0.55; // Line is slightly below middle (normalized 0-1)
+
+        class Particle {
+            constructor(x, y, color, isStar=false) {
+                this.x = x; this.y = y;
+                // Burst outwards
+                let angle = Math.random() * Math.PI * 2;
+                let speed = Math.random() * 15 + 5;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed - 5; // Slight upward bias
+                this.life = 1.0;
+                this.decay = Math.random() * 0.02 + 0.01;
+                this.color = color;
+                this.isStar = isStar;
+                this.size = Math.random() * 10 + 5;
+                this.rot = Math.random() * Math.PI;
+                this.rotSpeed = (Math.random() - 0.5) * 0.2;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.4; // Gravity
+                this.life -= this.decay;
+                this.rot += this.rotSpeed;
+            }
+            draw(ctx) {
+                if(this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rot);
+                ctx.fillStyle = this.color;
+                
+                if(this.isStar) {
+                    ctx.beginPath();
+                    for(let i=0; i<5; i++) {
+                        ctx.lineTo(Math.cos((18+i*72)/180*Math.PI)*this.size, -Math.sin((18+i*72)/180*Math.PI)*this.size);
+                        ctx.lineTo(Math.cos((54+i*72)/180*Math.PI)*this.size*0.4, -Math.sin((54+i*72)/180*Math.PI)*this.size*0.4);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.size, 0, Math.PI*2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+        let particles = [];
+
+        class Balloon {
+            constructor(c, r, num, cols, rows) {
+                this.gridC = c;
+                this.gridR = r;
+                this.number = num;
+                this.isEven = (num % 2 === 0);
+                this.popped = false;
+                
+                // Colors: Evens slightly warmer, Odds cooler (subtle hint, but mainly random brights)
+                const colors = ['#FF1493', '#00BFFF', '#32CD32', '#FF8C00', '#9370DB', '#FFD700', '#FF3366', '#00E5FF'];
+                this.color = colors[Math.floor(Math.random() * colors.length)];
+                this.floatOffset = Math.random() * Math.PI * 2;
+                
+                this.calculateTarget();
+                
+                // Start offscreen bottom
+                this.x = this.targetX;
+                this.y = canvas.height + 100; 
+                this.currentY = this.y;
+            }
+            
+            calculateTarget() {
+                // Layout 6 cols x 2 rows in the top ~40% of screen
+                const cols = 6;
+                const rows = 2;
+                const areaWidth = canvas.width * 0.9;
+                const offsetX = (canvas.width - areaWidth) / 2;
+                const spacingX = areaWidth / cols;
+                
+                // Adjust size based on screen, max 80 radius
+                this.radius = Math.min(spacingX * 0.4, canvas.height * 0.08, 80); 
+                
+                const startY = canvas.height * 0.12; 
+                const spacingY = this.radius * 2.5;
+
+                this.targetX = offsetX + (this.gridC + 0.5) * spacingX;
+                this.targetY = startY + (this.gridR * spacingY);
+            }
+
+            update() {
+                if(this.popped) return;
+                // Ease to target
+                this.y += (this.targetY - this.y) * 0.05;
+                // Bobbing effect
+                this.currentY = this.y + Math.sin(Date.now()*0.003 + this.floatOffset) * (this.radius * 0.15);
+            }
+
+            draw(ctx) {
+                if(this.popped) return;
+                
+                // Balloon knot & string
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.currentY + this.radius);
+                ctx.lineTo(this.x - 5, this.currentY + this.radius + 10);
+                ctx.lineTo(this.x + 5, this.currentY + this.radius + 10);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.currentY + this.radius + 10);
+                // Wavy string
+                ctx.bezierCurveTo(this.x + 10, this.currentY + this.radius + 30, this.x - 10, this.currentY + this.radius + 50, this.x, this.currentY + this.radius + 70);
+                ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Main body
+                ctx.beginPath();
+                // Slight squish effect
+                ctx.ellipse(this.x, this.currentY, this.radius, this.radius * 1.1, 0, 0, Math.PI*2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                
+                // Highlight (Shiny)
+                ctx.beginPath();
+                ctx.ellipse(this.x - this.radius*0.3, this.currentY - this.radius*0.4, this.radius*0.2, this.radius*0.3, Math.PI/4, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.fill();
+
+                // Number Text
+                ctx.fillStyle = '#fff';
+                // Adjust font size dynamically
+                ctx.font = `bold ${this.radius * 0.9}px Mitr`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                // Strong shadow for readability
+                ctx.shadowColor = '#000';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 2;
+                ctx.fillText(this.number, this.x, this.currentY);
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
+        }
+        let balloons = [];
+
+        class Dart {
+            constructor() {
+                this.reset();
+                this.gravity = 0.5;
+            }
+            reset() {
+                this.x = 0; this.y = 0;
+                this.vx = 0; this.vy = 0;
+                this.state = 'IDLE'; // IDLE, AIMING, FLYING, FLYING_POST_HIT
+                this.angle = -Math.PI/2; 
+            }
+            update() {
+                if(this.state === 'FLYING' || this.state === 'FLYING_POST_HIT') {
+                    this.vy += this.gravity;
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.angle = Math.atan2(this.vy, this.vx);
+
+                    // Off screen check
+                    if(this.y > canvas.height + 100 || this.x < -100 || this.x > canvas.width + 100) {
+                        this.reset();
+                    }
+                }
+            }
+            draw(ctx) {
+                if(this.state === 'IDLE') return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                let dartW = Math.min(canvas.width * 0.2, 110);
+                let dartH = dartW * 0.3;
+
+                if (assetsLoaded.dart) {
+                    // Assuming image points right originally. If not, adjustment needed here.
+                    ctx.drawImage(assets.dart, -dartW/2, -dartH/2, dartW, dartH); 
+                } else {
+                    // Fallback Dart Drawing
+                    // Shaft
+                    ctx.fillStyle = '#d4af37'; // Gold-ish
+                    ctx.fillRect(-dartW/2, -dartH/4, dartW*0.8, dartH/2);
+                    // Fletching (Feathers)
+                    ctx.fillStyle = '#ff3333';
+                    ctx.beginPath();
+                    ctx.moveTo(-dartW/2, -dartH/4); 
+                    ctx.lineTo(-dartW/2 + dartW*0.3, -dartH*0.8); 
+                    ctx.lineTo(-dartW/2 + dartW*0.1, -dartH/4); 
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(-dartW/2, dartH/4); 
+                    ctx.lineTo(-dartW/2 + dartW*0.3, dartH*0.8); 
+                    ctx.lineTo(-dartW/2 + dartW*0.1, dartH/4); 
+                    ctx.fill();
+                    // Tip
+                    ctx.fillStyle = '#aaa';
+                    ctx.beginPath();
+                    ctx.moveTo(dartW*0.3, -dartH/4); 
+                    ctx.lineTo(dartW/2, 0); 
+                    ctx.lineTo(dartW*0.3, dartH/4); 
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+        let dart = new Dart();
+
+        //        let numberPool = [];
+        function getNumberPool() {
+            let pool = [];
+            // Generate 15 evens, 15 odds
+            for(let i=0; i<15; i++) pool.push(Math.floor(Math.random()*49)*2 + 2); // 2-98
+            for(let i=0; i<15; i++) pool.push(Math.floor(Math.random()*50)*2 + 1); // 1-99
+            // Shuffle
+            for (let i = pool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [pool[i], pool[j]] = [pool[j], pool[i]];
+            }
+            return pool;
+        }
+
+        function initBalloons(isResize = false) {
+            const cols = 6;
+            const rows = 2;
+            
+            if(!isResize) balloons = [];
+
+            // If resizing, just recalculate targets
+            if(isResize) {
+                balloons.forEach(b => b.calculateTarget());
+                return;
+            }
+
+            // Spawn initial grid (up to 12)
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    if(numberPool.length > 0) {
+                        balloons.push(new Balloon(c, r, numberPool.pop(), cols, rows));
+                    }
+                }
+            }
+        }
+
+        function createExplosion(x, y, isCorrect) {
+            let count = isCorrect ? 60 : 25;
+            let colors = isCorrect ? ['#FFD700', '#FFF', '#FFA500', '#00FFFF'] : ['#555', '#333', '#888', '#FF0000'];
+            for(let i=0; i<count; i++) {
+                particles.push(new Particle(x, y, colors[Math.floor(Math.random()*colors.length)], isCorrect && Math.random()>0.5));
+            }
+            
+            // Text popup effect
+            const popup = document.createElement('div');
+            popup.innerText = isCorrect ? '+100' : '-50';
+            popup.className = `absolute text-4xl md:text-6xl font-bold ${isCorrect ? 'text-yellow-400 text-glow' : 'text-red-500'} pointer-events-none transition-all duration-1000 ease-out z-50`;
+            popup.style.left = `${x}px`;
+            popup.style.top = `${y}px`;
+            popup.style.transform = 'translate(-50%, -50%)';
+            document.body.appendChild(popup);
+            
+            // Animate up and fade out
+            setTimeout(() => {
+                popup.style.top = `${y - 100}px`;
+                popup.style.opacity = '0';
+            }, 50);
+            
+            setTimeout(() => popup.remove(), 1050);
+        }
+
+        function drawTrajectory(ctx, startX, startY, vx, vy) {
+            ctx.beginPath();
+            let px = startX;
+            let py = startY;
+            let tvx = vx;
+            let tvy = vy;
+            ctx.moveTo(px, py);
+            
+            // Predict path
+            for(let i=0; i<40; i++) {
+                tvy += dart.gravity;
+                px += tvx;
+                py += tvy;
+                if(i % 4 === 0) ctx.lineTo(px, py);
+            }
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.setLineDash([10, 15]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function checkCollisions() {
+            if(dart.state !== 'FLYING') return;
+
+            for(let i = balloons.length - 1; i >= 0; i--) {
+                let b = balloons[i];
+                if(b.popped) continue;
+                
+                // Ellipse collision approximation based on drawn shape
+                let dx = dart.x - b.x;
+                let dy = dart.y - b.currentY;
+                
+                // Normalize dy based on the ellipse squish factor (1.1) used in drawing
+                dy = dy / 1.1; 
+                let dist = Math.hypot(dx, dy);
+
+                // Add margin for dart size
+                if(dist < b.radius + (canvas.width * 0.03)) { 
+                    
+                    b.popped = true;
+                    playPopSound();
+                    roundsPlayed++;
+                    
+                    if(b.isEven) {
+                        score += 100;
+                        createExplosion(b.x, b.currentY, true);
+                        playCorrectSound();
+                    } else {
+                        score = Math.max(0, score - 50); // Penalty, min 0
+                        createExplosion(b.x, b.currentY, false);
+                        playWrongSound();
+                    }
+                    
+                    updateHUD();
+                    
+                    // Dart pierces through! It feels better than disappearing.
+                    // But we only want it to hit ONE balloon per shot to prevent double scoring easily.
+                    // So we turn off collision for this dart flight.
+                    dart.state = 'FLYING_POST_HIT'; // custom state
+
+                    // Replace popped balloon
+                    setTimeout(() => {
+                        balloons.splice(i, 1);
+                        if(numberPool.length > 0) {
+                            // Maintain grid position
+                            balloons.push(new Balloon(b.gridC, b.gridR, numberPool.pop(), 6, 2));
+                        }
+                        
+                        if(roundsPlayed >= MAX_ROUNDS) {
+                            endGame();
+                        }
+                    }, 300);
+                    
+                    break;
+                }
+            }
+        }
+
+        function getPointerPos(e) {
+            let evt = e;
+            if (e.touches && e.touches.length > 0) {
+                evt = e.touches[0];
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                evt = e.changedTouches[0];
+            }
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: evt.clientX - rect.left,
+                y: evt.clientY - rect.top
+            };
+        }
+
+        function handleInputStart(e) {
+            if(GAME_STATE !== 'PLAYING' || INPUT_MODE !== 'TOUCH') return;
+            isInputActive = true;
+            const pos = getPointerPos(e);
+            cursorX = pos.x;
+            cursorY = pos.y;
+
+            // Check if input is in valid throw zone
+            if(cursorY > canvas.height * THROW_ZONE_Y && dart.state === 'IDLE') {
+                isAiming = true;
+                aimStartX = cursorX;
+                aimStartY = cursorY;
+                dart.state = 'AIMING';
+            }
+        }
+
+        function handleInputMove(e) {
+            if(GAME_STATE !== 'PLAYING' || INPUT_MODE !== 'TOUCH') return;
+            isInputActive = true;
+            const pos = getPointerPos(e);
+            cursorX = pos.x;
+            cursorY = pos.y;
+
+            if(isAiming) {
+                dart.x = cursorX;
+                dart.y = cursorY;
+                // Calculate angle for visual rendering
+                dart.angle = Math.atan2(aimStartY - cursorY, aimStartX - cursorX);
+            }
+        }
+
+        function handleInputEnd(e) {
+            if(GAME_STATE !== 'PLAYING' || INPUT_MODE !== 'TOUCH') return;
+            
+            if(isAiming && dart.state === 'AIMING') {
+                isAiming = false;
+                
+                // Calculate launch velocity (Slingshot mechanic: pull back = fly forward)
+                let pullX = aimStartX - cursorX;
+                let pullY = aimStartY - cursorY;
+                
+                // Slingshot power multiplier
+                let power = 0.25; 
+                
+                // Prevent shooting backwards/downwards if they drag up instead of down
+                if(pullY < 0) {
+                    dart.reset(); // Cancel shot
+                    return;
+                }
+
+                dart.vx = pullX * power;
+                dart.vy = -pullY * power; // Negative Y goes up in canvas
+                dart.x = cursorX;
+                dart.y = cursorY;
+                
+                dart.state = 'FLYING';
+            }
+        }
+
+        // Attach Mouse/Touch events to Canvas
+        canvas.addEventListener('mousedown', handleInputStart);
+        canvas.addEventListener('mousemove', handleInputMove);
+        window.addEventListener('mouseup', handleInputEnd); // window to catch releases off-canvas
+        
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInputStart(e); }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); handleInputMove(e); }, {passive: false});
+        window.addEventListener('touchend', handleInputEnd);
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        const PINCH_THRESHOLD = 0.08; 
+
+        hands.onResults((results) => {
+            if(GAME_STATE !== 'PLAYING' || INPUT_MODE !== 'AR') return;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                isInputActive = true;
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Use thumb (4) and index finger (8)
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                
+                // Calculate midpoint mapped to canvas
+                cursorX = ((thumbTip.x + indexTip.x) / 2) * canvas.width;
+                cursorY = ((thumbTip.y + indexTip.y) / 2) * canvas.height;
+
+                // Adjust distance calculation for aspect ratio
+                const dx = (thumbTip.x - indexTip.x);
+                const dy = (thumbTip.y - indexTip.y) * (canvas.height/canvas.width);
+                const distance = Math.hypot(dx, dy);
+
+                const currentPinch = distance < PINCH_THRESHOLD;
+                const inAllowedZone = cursorY > canvas.height * THROW_ZONE_Y;
+
+                if(currentPinch && !isAiming) {
+                    // Start Pinch (Grab dart)
+                    if(inAllowedZone && dart.state === 'IDLE') {
+                        isAiming = true;
+                        aimStartX = cursorX;
+                        aimStartY = cursorY;
+                        dart.state = 'AIMING';
+                    }
+                } else if (!currentPinch && isAiming) {
+                    // Release Pinch (Throw dart)
+                    isAiming = false;
+                    if(dart.state === 'AIMING') {
+                        let pullX = aimStartX - cursorX;
+                        let pullY = aimStartY - cursorY;
+                        
+                        let power = 0.25;
+                        
+                        // Prevent shooting downwards
+                        if(pullY < 0) {
+                            dart.reset();
+                        } else {
+                            dart.vx = pullX * power;
+                            dart.vy = -pullY * power;
+                            dart.x = cursorX;
+                            dart.y = cursorY;
+                            dart.state = 'FLYING';
+                        }
+                    }
+                }
+
+                if(isAiming && dart.state === 'AIMING') {
+                    dart.x = cursorX;
+                    dart.y = cursorY;
+                    dart.angle = Math.atan2(aimStartY - cursorY, aimStartX - cursorX);
+                }
+
+            } else {
+                isInputActive = false;
+                if(isAiming && dart.state === 'AIMING') {
+                    // Hand lost while aiming, cancel
+                    isAiming = false;
+                    dart.reset();
+                }
+            }
+        });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if(GAME_STATE === 'PLAYING' && INPUT_MODE === 'AR') {
+                    await hands.send({image: videoElement});
+                }
+            },
+            width: 640,
+            height: 480
+        });
+
+        function drawBackground(ctx) {
+            if (INPUT_MODE === 'AR' && videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                const scale = Math.max(canvas.width / videoElement.videoWidth, canvas.height / videoElement.videoHeight);
+                const w = videoElement.videoWidth * scale;
+                const h = videoElement.videoHeight * scale;
+                const x = (canvas.width - w) / 2;
+                const y = (canvas.height - h) / 2;
+                ctx.drawImage(videoElement, x, y, w, h);
+
+                ctx.fillStyle = 'rgba(0,0,0,0.18)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else if (assetsLoaded.bg) {
+                // Fill cover
+                const scale = Math.max(canvas.width / assets.bg.width, canvas.height / assets.bg.height);
+                const w = assets.bg.width * scale;
+                const h = assets.bg.height * scale;
+                const x = (canvas.width - w) / 2;
+                const y = (canvas.height - h) / 2;
+                ctx.drawImage(assets.bg, x, y, w, h);
+                
+                // Darken for better contrast
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.fillRect(0,0,canvas.width,canvas.height);
+            } else {
+                // Fallback: Night sky gradient
+                const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                grad.addColorStop(0, '#0f0c29'); // deep purple
+                grad.addColorStop(0.5, '#302b63');
+                grad.addColorStop(1, '#24243e');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Add some static stars
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                for(let i=0; i<50; i++) {
+                    ctx.beginPath();
+                    // Deterministic pseudo-random positions based on index
+                    let sx = (Math.sin(i*123) * 0.5 + 0.5) * canvas.width;
+                    let sy = (Math.cos(i*321) * 0.5 + 0.5) * canvas.height;
+                    ctx.arc(sx, sy, Math.random()*1.5+0.5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function drawCursor(ctx) {
+            // Show a dart cursor in touch mode; keep the character cue for AR mode.
+            if(dart.state === 'IDLE' && isInputActive) {
+                let size = Math.min(canvas.width * 0.15, 110);
+                
+                if(INPUT_MODE === 'TOUCH') {
+                    ctx.save();
+                    ctx.translate(cursorX, cursorY);
+                    ctx.rotate(-Math.PI / 4);
+
+                    if(assetsLoaded.dart) {
+                        ctx.drawImage(assets.dart, -size/2, -size*0.15, size, size*0.3);
+                    } else {
+                        ctx.fillStyle = '#d4af37';
+                        ctx.fillRect(-size/2, -size*0.05, size*0.7, size*0.1);
+                        ctx.fillStyle = '#ff3333';
+                        ctx.beginPath();
+                        ctx.moveTo(-size/2, -size*0.08);
+                        ctx.lineTo(-size/2 + size*0.18, -size*0.22);
+                        ctx.lineTo(-size/2 + size*0.08, -size*0.08);
+                        ctx.fill();
+                        ctx.beginPath();
+                        ctx.moveTo(-size/2, size*0.08);
+                        ctx.lineTo(-size/2 + size*0.18, size*0.22);
+                        ctx.lineTo(-size/2 + size*0.08, size*0.08);
+                        ctx.fill();
+                        ctx.fillStyle = '#aaa';
+                        ctx.beginPath();
+                        ctx.moveTo(size*0.2, -size*0.08);
+                        ctx.lineTo(size/2, 0);
+                        ctx.lineTo(size*0.2, size*0.08);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                } else {
+                    if(assetsLoaded.char) {
+                        ctx.drawImage(assets.char, cursorX - size/2, cursorY - size/2, size, size);
+                    } else {
+                        ctx.save();
+                        ctx.translate(cursorX, cursorY);
+                        ctx.beginPath();
+                        ctx.arc(0, 0, size/2, 0, Math.PI*2);
+                        ctx.fillStyle = '#FFD180';
+                        ctx.fill();
+                        ctx.lineWidth = 4;
+                        ctx.strokeStyle = '#E65100';
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+            }
+        }
+
+        function gameLoop() {
+            if(GAME_STATE === 'PLAYING') {
+                animationId = requestAnimationFrame(gameLoop);
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground(ctx);
+
+            if(GAME_STATE !== 'PLAYING') return;
+
+            // Draw Throw Limit Line
+            const lineY = canvas.height * THROW_ZONE_Y;
+            ctx.beginPath();
+            ctx.moveTo(0, lineY);
+            ctx.lineTo(canvas.width, lineY);
+            ctx.strokeStyle = 'rgba(255, 200, 0, 0.4)';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([20, 20]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Text near line
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.font = 'bold 20px Mitr';
+            ctx.textAlign = 'center';
+            let instruction = INPUT_MODE === 'AR' ? 'พื้นที่จีบมือ (ดึงถอยหลังแล้วปล่อย)' : 'พื้นที่แตะ/คลิก (ลากถอยหลังแล้วปล่อย)';
+            ctx.fillText(instruction, canvas.width/2, lineY + 30);
+
+            // Objects Update & Draw
+            balloons.forEach(b => { b.update(); b.draw(ctx); });
+
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.update();
+                p.draw(ctx);
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+
+            // Logic Updates
+            dart.update();
+            checkCollisions(); // Also handles custom state FLYING_POST_HIT
+
+            // Draw Trajectory if aiming
+            if(dart.state === 'AIMING') {
+                let pullX = aimStartX - cursorX;
+                let pullY = aimStartY - cursorY;
+                
+                // Only draw trajectory if pulling backwards/downwards
+                if(pullY > 0) {
+                    let power = 0.25;
+                    drawTrajectory(ctx, cursorX, cursorY, pullX * power, -pullY * power);
+                }
+            }
+
+            // Draw entities
+            dart.draw(ctx);
+            drawCursor(ctx);
+        }
+
+        function updateHUD() {
+            document.getElementById('score-display').innerText = score;
+            document.getElementById('round-display').innerText = roundsPlayed;
+        }
+
+        async function startGame(mode) {
+            INPUT_MODE = mode;
+
+            // Resume audio context
+            if(audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            introVideo.muted = true;
+            introVideo.play().catch(() => {});
+
+            document.getElementById('start-touch-btn').classList.add('hidden');
+            document.getElementById('start-ar-btn').classList.add('hidden');
+            document.getElementById('loading-status').classList.remove('hidden');
+            document.getElementById('loading-status').classList.add('flex');
+            
+            const loadingText = document.getElementById('loading-text');
+            GAME_STATE = 'LOADING';
+
+            if(INPUT_MODE === 'AR') {
+                loadingText.innerText = "กำลังเปิดกล้องและโหลดระบบ AI...";
+                try {
+                    await camera.start();
+                    // Let AI initialize frames
+                    await new Promise(r => setTimeout(r, 1500)); 
+                    setupGameplay();
+                } catch(e) {
+                    alert("ไม่สามารถเข้าถึงกล้องได้ กรุณาอนุญาตการใช้งานกล้องในเบราว์เซอร์");
+                    resetStartScreen();
+                }
+            } else {
+                loadingText.innerText = "กำลังเตรียมกระดาน...";
+                setTimeout(setupGameplay, 800);
+            }
+        }
+
+        function setupGameplay() {
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('game-menu').classList.remove('hidden');
+            
+            resizeCanvas();
+            score = 0;
+            roundsPlayed = 0;
+            numberPool = getNumberPool();
+            initBalloons();
+            updateHUD();
+            dart.reset();
+            particles = [];
+            isAiming = false;
+            isInputActive = INPUT_MODE === 'TOUCH';
+            
+            startBGM();
+            GAME_STATE = 'PLAYING';
+            gameLoop();
+        }
+
+        function resetStartScreen() {
+            document.getElementById('start-touch-btn').classList.remove('hidden');
+            document.getElementById('start-ar-btn').classList.remove('hidden');
+            document.getElementById('loading-status').classList.add('hidden');
+            document.getElementById('game-menu').classList.add('hidden');
+            GAME_STATE = 'START';
+        }
+
+        function endGame() {
+            GAME_STATE = 'GAMEOVER';
+            stopBGM();
+            cancelAnimationFrame(animationId);
+            
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-menu').classList.add('hidden');
+            const gameOverScreen = document.getElementById('game-over-screen');
+            gameOverScreen.classList.remove('hidden');
+            gameOverScreen.classList.add('flex');
+            
+            // Animate score counter
+            let currentDisplayScore = 0;
+            const finalScoreElement = document.getElementById('final-score');
+            const duration = 1500;
+            const startTime = performance.now();
+            
+            function updateFinalScore(time) {
+                let elapsed = time - startTime;
+                let progress = Math.min(elapsed / duration, 1);
+                // Ease out quad
+                progress = progress * (2 - progress); 
+                currentDisplayScore = Math.floor(progress * score);
+                finalScoreElement.innerText = currentDisplayScore;
+                if(progress < 1) {
+                    requestAnimationFrame(updateFinalScore);
+                } else {
+                    finalScoreElement.innerText = score;
+                    if(score >= 1500) { // Perfect is 3000 (30*100) if no mistakes
+                        speak("ยอดเยี่ยมมากครับ คุณเก่งมาก", 1.2, 1);
+                        shootConfetti();
+                    } else {
+                        speak("พยายามได้ดีครับ เล่นอีกครั้งไหม", 1, 1);
+                    }
+                }
+            }
+            requestAnimationFrame(updateFinalScore);
+        }
+
+        function shootConfetti() {
+            const colors = ['#FFD700', '#FF3366', '#00E5FF', '#32CD32'];
+            let count = 0;
+            let interval = setInterval(() => {
+                let x = Math.random() * canvas.width;
+                for(let i=0; i<15; i++) {
+                    let p = new Particle(x, canvas.height, colors[Math.floor(Math.random()*colors.length)]);
+                    // Override velocity to shoot up like a fountain
+                    p.vy = -Math.random()*15 - 10;
+                    particles.push(p);
+                }
+                count++;
+                if(count > 20) clearInterval(interval);
+            }, 100);
+            
+            // Continue rendering particles for confetti over the game over screen
+            function renderConfetti() {
+                if(GAME_STATE === 'GAMEOVER') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    drawBackground(ctx);
+                    for(let i=particles.length-1; i>=0; i--) {
+                        let p = particles[i];
+                        p.update();
+                        p.draw(ctx);
+                        if(p.life <= 0) particles.splice(i, 1);
+                    }
+                    if(particles.length > 0) requestAnimationFrame(renderConfetti);
+                }
+            }
+            renderConfetti();
+        }
+
+        function restartGame() {
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.remove('flex');
+            
+            if(INPUT_MODE === 'AR') {
+                // Keep camera running and go straight to game
+                setupGameplay();
+            } else {
+                setupGameplay();
+            }
+        }
+
+        // Event Listeners for UI
+        document.getElementById('start-touch-btn').addEventListener('click', () => startGame('TOUCH'));
+        document.getElementById('start-ar-btn').addEventListener('click', () => startGame('AR'));
+        document.getElementById('restart-btn').addEventListener('click', restartGame);
+        document.getElementById('menu-restart-btn').addEventListener('click', restartGame);
+        document.getElementById('menu-home-btn').addEventListener('click', goHome);
+        introVideo.addEventListener('loadedmetadata', () => {
+            introVideo.play().catch(() => {});
+        });
+        introVideo.addEventListener('canplay', () => {
+            introVideo.play().catch(() => {});
+        });
+        const enableIntroVideoAudio = () => {
+            introVideo.muted = false;
+            introVideo.play().catch(() => {});
+        };
+        window.addEventListener('pointerdown', enableIntroVideoAudio, { once: true });
+        window.addEventListener('touchstart', enableIntroVideoAudio, { once: true, passive: true });
+
+        // Initial setup
+        resizeCanvas();
+        drawBackground(ctx); // Draw initial background
+        const startIntroPlayback = () => playIntroVideo('assets/cover.mp4');
+        window.addEventListener('DOMContentLoaded', startIntroPlayback, { once: true });
+        window.addEventListener('load', startIntroPlayback, { once: true });
+        startIntroPlayback();
+
+    </script>
+</body>
+</html>
